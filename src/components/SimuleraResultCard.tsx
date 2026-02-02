@@ -5,6 +5,7 @@ import Link from "next/link";
 import { formatCurrency } from "@/data/municipalities";
 import type { SimulationResult } from "@/lib/simulation";
 import RadarChart from "@/components/RadarChart";
+import LeadCaptureForm from "@/components/LeadCaptureForm";
 
 interface Props {
   result: SimulationResult;
@@ -235,6 +236,18 @@ export default function SimuleraResultCard({ result, rank, currentSize }: Props)
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Lead capture for premium municipalities */}
+      {m.premium && (
+        <div className="px-4 py-3 bg-emerald-50 border-t border-emerald-100">
+          <p className="text-sm font-medium text-emerald-800 mb-2">Intresserad av {m.name}?</p>
+          <LeadCaptureForm
+            municipalitySlug={m.slug}
+            municipalityName={m.name}
+            variant="compact"
+          />
         </div>
       )}
 

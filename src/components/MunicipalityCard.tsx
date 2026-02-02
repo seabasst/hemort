@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Municipality, formatNumber, formatCurrency } from "@/data/municipalities";
+import PremiumBadge from "@/components/PremiumBadge";
 
 export default function MunicipalityCard({ municipality }: { municipality: Municipality }) {
   return (
@@ -18,6 +19,11 @@ export default function MunicipalityCard({ municipality }: { municipality: Munic
         <span className="absolute bottom-3 left-3 text-sm font-semibold text-white drop-shadow-md">
           {municipality.name}
         </span>
+        {municipality.premium && (
+          <span className="absolute top-3 right-3">
+            <PremiumBadge size="sm" />
+          </span>
+        )}
       </div>
       <div className="p-5">
         <div className="flex items-start justify-between mb-2">

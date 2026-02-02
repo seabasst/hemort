@@ -1,3 +1,11 @@
+export interface Sponsor {
+  name: string;
+  logoUrl: string;
+  description: string;
+  websiteUrl: string;
+  category: string;
+}
+
 export interface Municipality {
   slug: string;
   name: string;
@@ -24,6 +32,8 @@ export interface Municipality {
   description: string;
   highlights: string[];
   imageUrl: string;
+  premium?: boolean;
+  sponsors?: Sponsor[];
 }
 
 export const municipalities: Municipality[] = [
@@ -512,6 +522,30 @@ export const municipalities: Municipality[] = [
     description: "En av Sveriges äldsta städer med det magnifika Kalmar slott. Bron till Öland, Östersjökust och en charmig småstadskänsla.",
     highlights: ["Kalmar slott", "Bron till Öland", "Kust & bad", "Historisk stad"],
     imageUrl: "https://images.unsplash.com/photo-1599230512624-bfa2364ffa54?w=800&h=500&fit=crop",
+    premium: true,
+    sponsors: [
+      {
+        name: "Kalmar Energi",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Kalmar+Energi",
+        description: "Hållbar energi för Kalmars framtid. Vi erbjuder el, fjärrvärme och bredband.",
+        websiteUrl: "https://www.kalmarenergi.se",
+        category: "Energi",
+      },
+      {
+        name: "Ölandshamnen",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Ölandshamnen",
+        description: "Kalmars nya stadsdel vid vattnet med bostäder, kontor och restauranger.",
+        websiteUrl: "https://www.kalmar.se",
+        category: "Fastigheter",
+      },
+      {
+        name: "Baronen Köpcentrum",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Baronen",
+        description: "Kalmars största köpcentrum med över 70 butiker i centralt läge.",
+        websiteUrl: "https://www.baronen.se",
+        category: "Handel",
+      },
+    ],
   },
   {
     slug: "ostersund",
@@ -566,11 +600,46 @@ export const municipalities: Municipality[] = [
     description: "Hallandskustens pärla med Sveriges bästa stränder, laxfiske i Ätran och en småstadscharm som vinner allt fler hjärtan.",
     highlights: ["Skrea strand", "Laxfiske i Ätran", "Låg skattesats", "Lugnt kustliv"],
     imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=500&fit=crop",
+    premium: true,
+    sponsors: [
+      {
+        name: "Falkenbergs Sparbank",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Sparbanken",
+        description: "Lokal bank med hjärtat i Falkenberg. Vi hjälper dig med bolån och sparande.",
+        websiteUrl: "https://www.falkenbergssparbank.se",
+        category: "Bank & Finans",
+      },
+      {
+        name: "Skrea Strand Camping",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Skrea+Strand",
+        description: "Prisbelönt camping vid Sveriges bästa strand. Stugor och ställplatser året runt.",
+        websiteUrl: "https://www.skreastrandcamping.se",
+        category: "Turism",
+      },
+      {
+        name: "Falkenberg Energi",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=FE+Energi",
+        description: "100% förnybar energi till Falkenbergs invånare och företag.",
+        websiteUrl: "https://www.falkenberg-energi.se",
+        category: "Energi",
+      },
+      {
+        name: "Gekås Ullared",
+        logoUrl: "https://placehold.co/120x60/059669/white?text=Gekås",
+        description: "Skandinaviens största varuhus, bara 20 minuter från Falkenberg.",
+        websiteUrl: "https://www.gekas.se",
+        category: "Handel",
+      },
+    ],
   },
 ];
 
 export function getMunicipality(slug: string): Municipality | undefined {
   return municipalities.find((m) => m.slug === slug);
+}
+
+export function getPremiumMunicipalities(): Municipality[] {
+  return municipalities.filter((m) => m.premium);
 }
 
 export function searchMunicipalities(query: string): Municipality[] {
