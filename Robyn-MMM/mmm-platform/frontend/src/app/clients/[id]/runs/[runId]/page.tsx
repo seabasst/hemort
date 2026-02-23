@@ -30,6 +30,41 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: 'Model One-Pagers',
 }
 
+const CATEGORY_DESCRIPTIONS: Record<string, { summary: string; details: string }> = {
+  response_curves: {
+    summary: 'Shows how each channel responds to increased spending',
+    details: 'These curves visualize diminishing returns — as you spend more on a channel, each additional dollar generates less incremental revenue. Steeper curves mean more headroom to scale. Flatter curves indicate saturation. Use these to identify which channels can absorb more budget efficiently.'
+  },
+  model_selection: {
+    summary: 'How the model chose the best-fit parameters',
+    details: 'Robyn tests thousands of parameter combinations and selects models that balance accuracy (fitting historical data) with business constraints (reasonable ROI ranges). These plots show the trade-offs between different model candidates and why the final model was selected.'
+  },
+  decomposition: {
+    summary: 'Breaks down what drove your revenue over time',
+    details: 'These charts separate your total revenue into components: baseline (what you\'d get with zero marketing), each channel\'s contribution, seasonality, and trends. This helps you understand how much of your success is driven by marketing vs. organic factors.'
+  },
+  channel_analysis: {
+    summary: 'Deep dive into individual channel performance',
+    details: 'Detailed views of each marketing channel including spend patterns, attributed conversions, ROI over time, and efficiency metrics. Use these to spot trends, seasonality in channel performance, or periods where channels over/under-performed.'
+  },
+  model_fit: {
+    summary: 'How well the model predicts your actual results',
+    details: 'Compares model predictions against actual revenue. A good model closely tracks reality. Look for: predicted vs actual lines overlapping (good fit), systematic over/under-prediction (potential bias), and how well the model captures peaks and valleys.'
+  },
+  adstock: {
+    summary: 'How marketing effects carry over time',
+    details: 'Marketing doesn\'t just work instantly — a TV ad seen today might drive a purchase next week. Adstock curves show how quickly each channel\'s effect decays. Longer "tails" mean lasting impact; short tails mean effects are immediate but fleeting.'
+  },
+  budget_allocation: {
+    summary: 'Optimized budget recommendations',
+    details: 'Based on the response curves, these show how to reallocate your budget for maximum ROI. The model suggests shifting spend from saturated channels to those with more headroom. Compare "current" vs "optimal" allocations to see potential improvements.'
+  },
+  other: {
+    summary: 'Comprehensive model summaries',
+    details: 'One-pager summaries that combine multiple insights into single views. These are useful for executive presentations or getting a holistic view of model results without diving into individual charts.'
+  },
+}
+
 const CHANNEL_COLORS: Record<string, string> = {
   meta_S: '#1877F2',      // Meta blue
   google_S: '#EA4335',    // Google red
@@ -182,6 +217,7 @@ export default function ModelRunPage() {
   const [optimizedBudget, setOptimizedBudget] = useState<BudgetAllocation[] | null>(null)
   const [budgetInput, setBudgetInput] = useState('')
   const [optimizing, setOptimizing] = useState(false)
+  const [expandedCategoryInfo, setExpandedCategoryInfo] = useState<string | null>(null)
   const [selectedPlot, setSelectedPlot] = useState<PlotInfo | null>(null)
 
   // Budget simulator state
@@ -1081,37 +1117,75 @@ export default function ModelRunPage() {
                 </p>
 
                 {Object.entries(groupPlotsByCategory(report.plots_available)).map(
-                  ([category, plots]) => (
-                    <div key={category} className="mb-8 last:mb-0">
-                      <h3 className="text-title mb-4">
-                        {CATEGORY_LABELS[category] || category}
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        {plots.map((plot) => (
-                          <button
-                            key={plot.name}
-                            onClick={() => setSelectedPlot(plot)}
-                            className="group relative bg-secondary rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all"
-                          >
-                            <div className="aspect-[4/3] relative">
-                              <img
-                                src={api.getPlotUrl(clientId, runId, plot.name)}
-                                alt={plot.name}
-                                className="w-full h-full object-contain bg-white"
-                                loading="lazy"
-                              />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                                <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
-                              </div>
+                  ([category, plots]) => {
+                    const categoryInfo = CATEGORY_DESCRIPTIONS[category]
+                    const isExpanded = expandedCategoryInfo === category
+
+                    return (
+                      <div key={category} className="mb-8 last:mb-0">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="text-title">
+                            {CATEGORY_LABELS[category] || category}
+                          </h3>
+                          {categoryInfo && (
+                            <button
+                              onClick={() => setExpandedCategoryInfo(isExpanded ? null : category)}
+                              className="flex items-center gap-1 text-sm text-muted hover:text-primary transition-colors"
+                            >
+                              <Info className="w-4 h-4" />
+                              <span className="hidden sm:inline">What is this?</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {categoryInfo && (
+                          <p className="text-caption text-muted mb-3">
+                            {categoryInfo.summary}
+                          </p>
+                        )}
+
+                        {/* Expandable info section */}
+                        {categoryInfo && isExpanded && (
+                          <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm">
+                            <div className="flex items-start justify-between gap-4">
+                              <p className="text-gray-700">{categoryInfo.details}</p>
+                              <button
+                                onClick={() => setExpandedCategoryInfo(null)}
+                                className="text-muted hover:text-dark flex-shrink-0"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
                             </div>
-                            <p className="text-caption text-muted p-2 truncate">
-                              {plot.name.replace(/_/g, ' ')}
-                            </p>
-                          </button>
-                        ))}
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                          {plots.map((plot) => (
+                            <button
+                              key={plot.name}
+                              onClick={() => setSelectedPlot(plot)}
+                              className="group relative bg-secondary rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all"
+                            >
+                              <div className="aspect-[4/3] relative">
+                                <img
+                                  src={api.getPlotUrl(clientId, runId, plot.name)}
+                                  alt={plot.name}
+                                  className="w-full h-full object-contain bg-white"
+                                  loading="lazy"
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                  <ZoomIn className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" />
+                                </div>
+                              </div>
+                              <p className="text-caption text-muted p-2 truncate">
+                                {plot.name.replace(/_/g, ' ')}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )
+                    )
+                  }
                 )}
               </div>
             )}
