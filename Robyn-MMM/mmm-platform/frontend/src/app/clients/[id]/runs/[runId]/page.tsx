@@ -15,8 +15,9 @@ import type { ReportSummary, BudgetAllocation, PlotInfo, ChannelContribution, Re
 import { format } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend
+  ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, Cell
 } from 'recharts'
+import { Sliders } from 'lucide-react'
 
 const CATEGORY_LABELS: Record<string, string> = {
   response_curves: 'Response Curves',
@@ -44,6 +45,24 @@ const CHANNEL_COLORS: Record<string, string> = {
 
 function getChannelColor(channel: string): string {
   return CHANNEL_COLORS[channel] || CHANNEL_COLORS.default
+}
+
+// Calculate expected response from spend using response curve data
+function interpolateResponse(curve: ResponseCurve, spend: number): number {
+  const { spend_values, response_values } = curve
+  if (spend <= 0) return 0
+  if (spend >= spend_values[spend_values.length - 1]) {
+    return response_values[response_values.length - 1]
+  }
+
+  // Find the two points to interpolate between
+  for (let i = 0; i < spend_values.length - 1; i++) {
+    if (spend >= spend_values[i] && spend <= spend_values[i + 1]) {
+      const ratio = (spend - spend_values[i]) / (spend_values[i + 1] - spend_values[i])
+      return response_values[i] + ratio * (response_values[i + 1] - response_values[i])
+    }
+  }
+  return response_values[0]
 }
 
 function groupPlotsByCategory(plots: PlotInfo[]): Record<string, PlotInfo[]> {
@@ -165,6 +184,11 @@ export default function ModelRunPage() {
   const [optimizing, setOptimizing] = useState(false)
   const [selectedPlot, setSelectedPlot] = useState<PlotInfo | null>(null)
 
+  // Budget simulator state
+  const [simulatedBudgets, setSimulatedBudgets] = useState<Record<string, number>>({})
+  const [totalSimulatedBudget, setTotalSimulatedBudget] = useState(0)
+  const [showSimulatorInfo, setShowSimulatorInfo] = useState(false)
+
   const loadReport = useCallback(async () => {
     try {
       const data = await api.getReportSummary(clientId, runId)
@@ -198,6 +222,101 @@ export default function ModelRunPage() {
     if (!report?.channel_contributions) return []
     return generateRecommendations(report.channel_contributions)
   }, [report?.channel_contributions])
+
+  // Initialize simulated budgets from current spend
+  useEffect(() => {
+    if (report?.channel_contributions && Object.keys(simulatedBudgets).length === 0) {
+      const initial: Record<string, number> = {}
+      let total = 0
+      report.channel_contributions.forEach(c => {
+        initial[c.channel] = c.spend || 0
+        total += c.spend || 0
+      })
+      setSimulatedBudgets(initial)
+      setTotalSimulatedBudget(total)
+    }
+  }, [report?.channel_contributions, simulatedBudgets])
+
+  // Calculate simulated revenue based on response curves
+  const simulatedResults = useMemo(() => {
+    if (!report?.response_curves || !report?.channel_contributions) return null
+
+    let currentTotalRevenue = 0
+    let simulatedTotalRevenue = 0
+    const channelResults: Array<{
+      channel: string
+      currentSpend: number
+      simulatedSpend: number
+      currentRevenue: number
+      simulatedRevenue: number
+      change: number
+    }> = []
+
+    report.channel_contributions.forEach(contribution => {
+      const curve = report.response_curves?.find(c => c.channel === contribution.channel)
+      if (!curve) return
+
+      const currentSpend = contribution.spend || 0
+      const simulatedSpend = simulatedBudgets[contribution.channel] || currentSpend
+
+      const currentRevenue = interpolateResponse(curve, currentSpend)
+      const simulatedRevenue = interpolateResponse(curve, simulatedSpend)
+
+      currentTotalRevenue += currentRevenue
+      simulatedTotalRevenue += simulatedRevenue
+
+      channelResults.push({
+        channel: contribution.channel,
+        currentSpend,
+        simulatedSpend,
+        currentRevenue,
+        simulatedRevenue,
+        change: simulatedRevenue - currentRevenue
+      })
+    })
+
+    return {
+      channels: channelResults,
+      currentTotal: currentTotalRevenue,
+      simulatedTotal: simulatedTotalRevenue,
+      totalChange: simulatedTotalRevenue - currentTotalRevenue,
+      percentChange: currentTotalRevenue > 0
+        ? ((simulatedTotalRevenue - currentTotalRevenue) / currentTotalRevenue) * 100
+        : 0
+    }
+  }, [report?.response_curves, report?.channel_contributions, simulatedBudgets])
+
+  const handleSliderChange = (channel: string, value: number) => {
+    setSimulatedBudgets(prev => {
+      const newBudgets = { ...prev, [channel]: value }
+      const newTotal = Object.values(newBudgets).reduce((sum, v) => sum + v, 0)
+      setTotalSimulatedBudget(newTotal)
+      return newBudgets
+    })
+  }
+
+  const handleTotalBudgetChange = (newTotal: number) => {
+    if (totalSimulatedBudget === 0) return
+    const ratio = newTotal / totalSimulatedBudget
+    const newBudgets: Record<string, number> = {}
+    Object.entries(simulatedBudgets).forEach(([channel, spend]) => {
+      newBudgets[channel] = Math.round(spend * ratio)
+    })
+    setSimulatedBudgets(newBudgets)
+    setTotalSimulatedBudget(newTotal)
+  }
+
+  const resetSimulator = () => {
+    if (!report?.channel_contributions) return
+    const initial: Record<string, number> = {}
+    let total = 0
+    report.channel_contributions.forEach(c => {
+      initial[c.channel] = c.spend || 0
+      total += c.spend || 0
+    })
+    setSimulatedBudgets(initial)
+    setTotalSimulatedBudget(total)
+  }
 
   const handleOptimize = async () => {
     if (!budgetInput) return
@@ -582,6 +701,225 @@ export default function ModelRunPage() {
                     <strong>How to read:</strong> Each curve shows how revenue response changes as you increase spend.
                     Steeper curves (like Email) mean high marginal returns. Flatter curves indicate saturation —
                     additional spend produces diminishing returns. The red dashed line shows your current spend level.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Budget Simulator */}
+            {report.response_curves && report.response_curves.length > 0 && simulatedResults && (
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Sliders className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-headline flex items-center gap-2">
+                        Budget Simulator
+                        <button
+                          onClick={() => setShowSimulatorInfo(!showSimulatorInfo)}
+                          className="text-muted hover:text-primary"
+                          title="How does this work?"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                      </h2>
+                      <p className="text-caption text-muted">
+                        Adjust channel budgets to see projected revenue impact
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={resetSimulator}
+                    className="text-sm text-muted hover:text-dark underline"
+                  >
+                    Reset to current
+                  </button>
+                </div>
+
+                {/* Info Dropdown */}
+                {showSimulatorInfo && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm space-y-3">
+                    <div className="flex items-start justify-between">
+                      <h3 className="font-semibold">How the Budget Simulator Works</h3>
+                      <button
+                        onClick={() => setShowSimulatorInfo(false)}
+                        className="text-muted hover:text-dark"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="space-y-2 text-muted">
+                      <p>
+                        <strong className="text-dark">Response Curves:</strong> Your MMM model learned how each
+                        channel responds to spend changes. These "response curves" capture diminishing returns —
+                        the more you spend, the less incremental revenue each additional dollar generates.
+                      </p>
+                      <p>
+                        <strong className="text-dark">Projections:</strong> When you adjust a slider, we use
+                        the response curve to calculate expected revenue at that spend level. This accounts
+                        for saturation effects that simple ROI multipliers miss.
+                      </p>
+                      <p>
+                        <strong className="text-dark">Limitations:</strong> Projections assume similar market
+                        conditions to your training data. Large budget changes (2x+) have more uncertainty.
+                        External factors (seasonality, competition, creative quality) also affect real results.
+                      </p>
+                      <p>
+                        <strong className="text-dark">Best Practice:</strong> Use this for directional guidance.
+                        Test significant changes with incrementality experiments before full rollout.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Total Budget Input */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="font-medium">Total Budget</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted">{report.client.currency}</span>
+                      <input
+                        type="number"
+                        value={Math.round(totalSimulatedBudget)}
+                        onChange={(e) => handleTotalBudgetChange(parseInt(e.target.value) || 0)}
+                        className="w-32 px-3 py-2 border border-border rounded-lg text-right font-mono"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted">
+                    Change total budget to scale all channels proportionally
+                  </p>
+                </div>
+
+                {/* Channel Sliders */}
+                <div className="space-y-6 mb-6">
+                  {contributions.map((channel) => {
+                    const currentSpend = channel.spend || 0
+                    const simulated = simulatedBudgets[channel.channel] || currentSpend
+                    const maxSpend = currentSpend * 3
+                    const changePercent = currentSpend > 0
+                      ? ((simulated - currentSpend) / currentSpend) * 100
+                      : 0
+
+                    const result = simulatedResults.channels.find(c => c.channel === channel.channel)
+                    const revenueChange = result ? result.change : 0
+
+                    return (
+                      <div key={channel.channel}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: getChannelColor(channel.channel) }}
+                            />
+                            <span className="font-medium">{formatChannelName(channel.channel)}</span>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <span className={`text-sm font-medium ${
+                              changePercent > 0 ? 'text-green-600' :
+                              changePercent < 0 ? 'text-red-600' : 'text-gray-500'
+                            }`}>
+                              {changePercent > 0 ? '+' : ''}{changePercent.toFixed(0)}%
+                            </span>
+                            <input
+                              type="number"
+                              value={Math.round(simulated)}
+                              onChange={(e) => handleSliderChange(channel.channel, parseInt(e.target.value) || 0)}
+                              className="w-28 px-2 py-1 border border-border rounded text-right text-sm font-mono"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="range"
+                            min={0}
+                            max={maxSpend}
+                            value={simulated}
+                            onChange={(e) => handleSliderChange(channel.channel, parseInt(e.target.value))}
+                            className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                          />
+                          <span className={`w-24 text-right text-sm ${
+                            revenueChange > 0 ? 'text-green-600' :
+                            revenueChange < 0 ? 'text-red-600' : 'text-gray-500'
+                          }`}>
+                            {revenueChange > 0 ? '+' : ''}{formatCurrency(revenueChange, '')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs text-muted mt-1">
+                          <span>Current: {formatCurrency(currentSpend, report.client.currency)}</span>
+                          <span>ROI: {channel.roi.toFixed(2)}x</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Results Summary */}
+                <div className={`p-4 rounded-lg border-2 ${
+                  simulatedResults.totalChange > 0
+                    ? 'bg-green-50 border-green-200'
+                    : simulatedResults.totalChange < 0
+                      ? 'bg-red-50 border-red-200'
+                      : 'bg-gray-50 border-gray-200'
+                }`}>
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <p className="text-sm text-muted">Current Revenue</p>
+                      <p className="text-lg font-bold">
+                        {formatCurrency(simulatedResults.currentTotal, report.client.currency)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted">Projected Revenue</p>
+                      <p className={`text-lg font-bold ${
+                        simulatedResults.totalChange > 0 ? 'text-green-600' :
+                        simulatedResults.totalChange < 0 ? 'text-red-600' : ''
+                      }`}>
+                        {formatCurrency(simulatedResults.simulatedTotal, report.client.currency)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted">Impact</p>
+                      <p className={`text-lg font-bold ${
+                        simulatedResults.totalChange > 0 ? 'text-green-600' :
+                        simulatedResults.totalChange < 0 ? 'text-red-600' : ''
+                      }`}>
+                        {simulatedResults.totalChange > 0 ? '+' : ''}
+                        {simulatedResults.percentChange.toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  {simulatedResults.totalChange !== 0 && (
+                    <div className="mt-4 pt-4 border-t border-current border-opacity-20">
+                      <p className="text-sm text-center">
+                        {simulatedResults.totalChange > 0 ? (
+                          <>
+                            <strong className="text-green-700">
+                              +{formatCurrency(simulatedResults.totalChange, report.client.currency)}
+                            </strong>
+                            {' '}projected additional revenue with this allocation
+                          </>
+                        ) : (
+                          <>
+                            <strong className="text-red-700">
+                              {formatCurrency(simulatedResults.totalChange, report.client.currency)}
+                            </strong>
+                            {' '}projected revenue decrease with this allocation
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                  <p className="text-sm">
+                    <strong>Note:</strong> Projections are based on your MMM response curves and assume
+                    similar market conditions. Actual results may vary. Use this as a directional guide,
+                    not a guarantee.
                   </p>
                 </div>
               </div>
