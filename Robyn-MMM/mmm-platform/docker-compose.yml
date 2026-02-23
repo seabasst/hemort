@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mmm_postgres
+    environment:
+      POSTGRES_USER: mmm_user
+      POSTGRES_PASSWORD: mmm_password
+      POSTGRES_DB: mmm_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mmm_user -d mmm_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mmm_backend
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://mmm_user:mmm_password@postgres:5432/mmm_platform
+      JWT_SECRET: your-secret-key-change-in-production
+      BIGQUERY_PROJECT_ID: ${BIGQUERY_PROJECT_ID:-}
+    volumes:
+      - ./backend:/app
+      - model_outputs:/app/outputs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 4000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mmm_frontend
+    ports:
+      - "5001:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  model_outputs:

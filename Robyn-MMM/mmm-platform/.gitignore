@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+
+# Uploads and outputs
+outputs/
+uploads/
+
+# R
+.Rhistory
+.RData
+*.Rproj.user
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Docker
+docker-compose.override.yml
