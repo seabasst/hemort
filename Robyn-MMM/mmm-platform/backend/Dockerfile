@@ -34,4 +34,5 @@ RUN mkdir -p /app/outputs
 
 EXPOSE 4000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "4000"]
+# Use PORT env var if set (Railway sets this), otherwise default to 4000
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-4000}
