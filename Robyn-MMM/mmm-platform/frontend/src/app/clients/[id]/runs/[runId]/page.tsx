@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation'
 import {
   ArrowLeft, Download, RefreshCw, AlertCircle, X, ZoomIn,
   TrendingUp, TrendingDown, ArrowRight, DollarSign, Target,
-  AlertTriangle, CheckCircle, Info
+  AlertTriangle, CheckCircle, Info, Calendar, Copy, FileDown
 } from 'lucide-react'
 import { Header } from '@/components/Header'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -15,7 +15,8 @@ import type { ReportSummary, BudgetAllocation, PlotInfo, ChannelContribution, Re
 import { format } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, Cell
+  ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, Cell,
+  AreaChart, Area, ComposedChart
 } from 'recharts'
 import { Sliders } from 'lucide-react'
 
@@ -224,6 +225,13 @@ export default function ModelRunPage() {
   const [simulatedBudgets, setSimulatedBudgets] = useState<Record<string, number>>({})
   const [totalSimulatedBudget, setTotalSimulatedBudget] = useState(0)
   const [showSimulatorInfo, setShowSimulatorInfo] = useState(false)
+  const [budgetsInitialized, setBudgetsInitialized] = useState(false)
+
+  // Quarterly Budget Roadmap state
+  const [roadmapWeeks, setRoadmapWeeks] = useState(13) // Quarter = 13 weeks
+  const [weeklyBudgets, setWeeklyBudgets] = useState<Record<string, number[]>>({})
+  const [roadmapInitialized, setRoadmapInitialized] = useState(false)
+  const [showRoadmapInfo, setShowRoadmapInfo] = useState(false)
 
   const loadReport = useCallback(async () => {
     try {
@@ -261,20 +269,39 @@ export default function ModelRunPage() {
 
   // Initialize simulated budgets from current spend
   useEffect(() => {
-    if (report?.channel_contributions && Object.keys(simulatedBudgets).length === 0) {
+    if (!budgetsInitialized && report?.channel_contributions && report.channel_contributions.length > 0) {
       const initial: Record<string, number> = {}
       let total = 0
       report.channel_contributions.forEach(c => {
-        initial[c.channel] = c.spend || 0
-        total += c.spend || 0
+        const spend = c.spend || 0
+        initial[c.channel] = spend
+        total += spend
       })
+      console.log('Initializing budgets:', initial)
       setSimulatedBudgets(initial)
       setTotalSimulatedBudget(total)
+      setBudgetsInitialized(true)
     }
-  }, [report?.channel_contributions, simulatedBudgets])
+  }, [report?.channel_contributions, budgetsInitialized])
+
+  // Initialize weekly budgets for roadmap from response curves optimal spend
+  useEffect(() => {
+    if (!roadmapInitialized && report?.response_curves && report.response_curves.length > 0) {
+      const initial: Record<string, number[]> = {}
+      report.response_curves.forEach(curve => {
+        // Use optimal spend if available, otherwise use current spend
+        const totalSpend = curve.optimal_spend || curve.current_spend || 0
+        const weeklySpend = totalSpend / roadmapWeeks
+        initial[curve.channel] = Array(roadmapWeeks).fill(Math.round(weeklySpend))
+      })
+      setWeeklyBudgets(initial)
+      setRoadmapInitialized(true)
+    }
+  }, [report?.response_curves, roadmapWeeks, roadmapInitialized])
 
   // Calculate simulated revenue based on response curves
   const simulatedResults = useMemo(() => {
+    console.log('Calculating simulatedResults, budgets:', simulatedBudgets)
     if (!report?.response_curves || !report?.channel_contributions) return null
 
     let currentTotalRevenue = 0
@@ -289,14 +316,30 @@ export default function ModelRunPage() {
     }> = []
 
     report.channel_contributions.forEach(contribution => {
-      const curve = report.response_curves?.find(c => c.channel === contribution.channel)
-      if (!curve) return
+      // Try to find matching response curve (may have different naming conventions)
+      const curve = report.response_curves?.find(c =>
+        c.channel === contribution.channel ||
+        c.channel.replace('_S', '') === contribution.channel.replace('_S', '') ||
+        c.channel.toLowerCase() === contribution.channel.toLowerCase()
+      )
 
       const currentSpend = contribution.spend || 0
-      const simulatedSpend = simulatedBudgets[contribution.channel] || currentSpend
+      // Use ?? to allow 0 as a valid value
+      const simulatedSpend = simulatedBudgets[contribution.channel] ?? currentSpend
 
-      const currentRevenue = interpolateResponse(curve, currentSpend)
-      const simulatedRevenue = interpolateResponse(curve, simulatedSpend)
+      // If no curve found, use simple linear estimate based on ROI
+      let currentRevenue: number
+      let simulatedRevenue: number
+
+      if (curve) {
+        currentRevenue = interpolateResponse(curve, currentSpend)
+        simulatedRevenue = interpolateResponse(curve, simulatedSpend)
+      } else {
+        // Fallback: use linear ROI estimate
+        const roi = contribution.roi || 1
+        currentRevenue = currentSpend * roi
+        simulatedRevenue = simulatedSpend * roi
+      }
 
       currentTotalRevenue += currentRevenue
       simulatedTotalRevenue += simulatedRevenue
@@ -322,10 +365,185 @@ export default function ModelRunPage() {
     }
   }, [report?.response_curves, report?.channel_contributions, simulatedBudgets])
 
+  // Calculate roadmap projected revenue using response curves
+  const roadmapResults = useMemo(() => {
+    if (!report?.response_curves || Object.keys(weeklyBudgets).length === 0) return null
+
+    const weeklyData: Array<{
+      week: number
+      weekLabel: string
+      totalSpend: number
+      projectedRevenue: number
+      [key: string]: number | string
+    }> = []
+
+    let totalQuarterlySpend = 0
+    let totalQuarterlyRevenue = 0
+
+    for (let week = 0; week < roadmapWeeks; week++) {
+      let weekSpend = 0
+      let weekRevenue = 0
+      const weekData: Record<string, number | string> = {
+        week: week + 1,
+        weekLabel: `W${week + 1}`
+      }
+
+      Object.entries(weeklyBudgets).forEach(([channel, budgets]) => {
+        const spend = budgets[week] || 0
+        weekSpend += spend
+        weekData[channel] = spend
+
+        // Find matching response curve
+        const curve = report.response_curves?.find(c =>
+          c.channel === channel ||
+          c.channel.replace('_S', '') === channel.replace('_S', '')
+        )
+
+        if (curve) {
+          weekRevenue += interpolateResponse(curve, spend)
+        }
+      })
+
+      weekData.totalSpend = weekSpend
+      weekData.projectedRevenue = weekRevenue
+      weeklyData.push(weekData as typeof weeklyData[0])
+
+      totalQuarterlySpend += weekSpend
+      totalQuarterlyRevenue += weekRevenue
+    }
+
+    // Calculate channel totals
+    const channelTotals: Record<string, { spend: number; revenue: number }> = {}
+    Object.entries(weeklyBudgets).forEach(([channel, budgets]) => {
+      const totalSpend = budgets.reduce((sum, b) => sum + b, 0)
+      const curve = report.response_curves?.find(c =>
+        c.channel === channel ||
+        c.channel.replace('_S', '') === channel.replace('_S', '')
+      )
+      // For total revenue, we need to sum weekly revenues (not calculate from total spend)
+      let totalRevenue = 0
+      budgets.forEach(weekSpend => {
+        if (curve) {
+          totalRevenue += interpolateResponse(curve, weekSpend)
+        }
+      })
+      channelTotals[channel] = { spend: totalSpend, revenue: totalRevenue }
+    })
+
+    return {
+      weeklyData,
+      channelTotals,
+      totalQuarterlySpend,
+      totalQuarterlyRevenue,
+      roi: totalQuarterlySpend > 0 ? totalQuarterlyRevenue / totalQuarterlySpend : 0
+    }
+  }, [weeklyBudgets, report?.response_curves, roadmapWeeks])
+
+  // Roadmap helper functions
+  const handleWeeklyBudgetChange = (channel: string, weekIndex: number, value: number) => {
+    setWeeklyBudgets(prev => {
+      const newBudgets = { ...prev }
+      if (!newBudgets[channel]) {
+        newBudgets[channel] = Array(roadmapWeeks).fill(0)
+      }
+      newBudgets[channel] = [...newBudgets[channel]]
+      newBudgets[channel][weekIndex] = Math.max(0, value)
+      return newBudgets
+    })
+  }
+
+  const handleChannelTotalChange = (channel: string, newTotal: number) => {
+    setWeeklyBudgets(prev => {
+      const currentTotal = prev[channel]?.reduce((sum, b) => sum + b, 0) || 1
+      const ratio = newTotal / currentTotal
+      const newBudgets = { ...prev }
+      newBudgets[channel] = prev[channel].map(b => Math.round(b * ratio))
+      return newBudgets
+    })
+  }
+
+  const handleTotalRoadmapBudgetChange = (newTotal: number) => {
+    const currentTotal = Object.values(weeklyBudgets).flat().reduce((sum, b) => sum + b, 0) || 1
+    const ratio = newTotal / currentTotal
+    setWeeklyBudgets(prev => {
+      const newBudgets: Record<string, number[]> = {}
+      Object.entries(prev).forEach(([channel, budgets]) => {
+        newBudgets[channel] = budgets.map(b => Math.round(b * ratio))
+      })
+      return newBudgets
+    })
+  }
+
+  const resetRoadmap = () => {
+    if (!report?.response_curves) return
+    const initial: Record<string, number[]> = {}
+    report.response_curves.forEach(curve => {
+      const totalSpend = curve.optimal_spend || curve.current_spend || 0
+      const weeklySpend = totalSpend / roadmapWeeks
+      initial[curve.channel] = Array(roadmapWeeks).fill(Math.round(weeklySpend))
+    })
+    setWeeklyBudgets(initial)
+  }
+
+  const exportRoadmapCSV = () => {
+    if (!roadmapResults) return
+
+    const channels = Object.keys(weeklyBudgets)
+    const headers = ['Week', ...channels.map(c => formatChannelName(c)), 'Total Spend', 'Projected Revenue']
+    const rows = roadmapResults.weeklyData.map(week => {
+      const row = [
+        week.weekLabel,
+        ...channels.map(c => (week[c] as number || 0).toString()),
+        week.totalSpend.toString(),
+        Math.round(week.projectedRevenue).toString()
+      ]
+      return row.join(',')
+    })
+
+    // Add totals row
+    const totalsRow = [
+      'Total',
+      ...channels.map(c => roadmapResults.channelTotals[c]?.spend.toString() || '0'),
+      roadmapResults.totalQuarterlySpend.toString(),
+      Math.round(roadmapResults.totalQuarterlyRevenue).toString()
+    ]
+    rows.push(totalsRow.join(','))
+
+    const csv = [headers.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `budget-roadmap-q${Math.ceil(new Date().getMonth() / 3) + 1}-${new Date().getFullYear()}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const copyRoadmapToClipboard = () => {
+    if (!roadmapResults) return
+
+    const channels = Object.keys(weeklyBudgets)
+    const headers = ['Week', ...channels.map(c => formatChannelName(c)), 'Total Spend', 'Projected Revenue']
+    const rows = roadmapResults.weeklyData.map(week => {
+      return [
+        week.weekLabel,
+        ...channels.map(c => formatCurrency(week[c] as number || 0, '')),
+        formatCurrency(week.totalSpend, ''),
+        formatCurrency(week.projectedRevenue, '')
+      ].join('\t')
+    })
+
+    const text = [headers.join('\t'), ...rows].join('\n')
+    navigator.clipboard.writeText(text)
+  }
+
   const handleSliderChange = (channel: string, value: number) => {
+    const safeValue = isNaN(value) ? 0 : Math.max(0, value)
+    console.log('Slider change:', channel, safeValue)
     setSimulatedBudgets(prev => {
-      const newBudgets = { ...prev, [channel]: value }
-      const newTotal = Object.values(newBudgets).reduce((sum, v) => sum + v, 0)
+      const newBudgets = { ...prev, [channel]: safeValue }
+      const newTotal = Object.values(newBudgets).reduce((sum, v) => sum + (v || 0), 0)
+      console.log('New budgets:', newBudgets, 'Total:', newTotal)
       setTotalSimulatedBudget(newTotal)
       return newBudgets
     })
@@ -833,8 +1051,8 @@ export default function ModelRunPage() {
                 <div className="space-y-6 mb-6">
                   {contributions.map((channel) => {
                     const currentSpend = channel.spend || 0
-                    const simulated = simulatedBudgets[channel.channel] || currentSpend
-                    const maxSpend = currentSpend * 3
+                    const simulated = simulatedBudgets[channel.channel] ?? currentSpend
+                    const maxSpend = Math.max(currentSpend * 3, totalSpend * 0.5, 10000)
                     const changePercent = currentSpend > 0
                       ? ((simulated - currentSpend) / currentSpend) * 100
                       : 0
@@ -956,6 +1174,272 @@ export default function ModelRunPage() {
                     <strong>Note:</strong> Projections are based on your MMM response curves and assume
                     similar market conditions. Actual results may vary. Use this as a directional guide,
                     not a guarantee.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Quarterly Budget Roadmap */}
+            {report.response_curves && report.response_curves.length > 0 && roadmapResults && (
+              <div className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Calendar className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-headline flex items-center gap-2">
+                        Quarterly Budget Roadmap
+                        <button
+                          onClick={() => setShowRoadmapInfo(!showRoadmapInfo)}
+                          className="text-muted hover:text-primary"
+                          title="How does this work?"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                      </h2>
+                      <p className="text-caption text-muted">
+                        Plan your weekly spend per channel for the upcoming quarter
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={resetRoadmap}
+                      className="text-sm text-muted hover:text-dark underline"
+                    >
+                      Reset to optimal
+                    </button>
+                  </div>
+                </div>
+
+                {/* Info Dropdown */}
+                {showRoadmapInfo && (
+                  <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm space-y-3">
+                    <div className="flex items-start justify-between">
+                      <h3 className="font-semibold">How the Budget Roadmap Works</h3>
+                      <button
+                        onClick={() => setShowRoadmapInfo(false)}
+                        className="text-muted hover:text-dark"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="space-y-2 text-muted">
+                      <p>
+                        <strong className="text-dark">Optimal Distribution:</strong> The roadmap starts with
+                        your model's recommended optimal spend distributed evenly across 13 weeks (one quarter).
+                      </p>
+                      <p>
+                        <strong className="text-dark">Weekly Editing:</strong> Click any cell to adjust spend
+                        for specific weeks. Useful for planning around sales events, holidays, or campaign timing.
+                      </p>
+                      <p>
+                        <strong className="text-dark">Revenue Projection:</strong> Each week's projected revenue
+                        is calculated using your response curves, accounting for diminishing returns.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary Cards */}
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                  <div className="p-4 bg-gray-50 rounded-lg text-center">
+                    <p className="text-sm text-muted">Total Budget</p>
+                    <p className="text-xl font-bold">
+                      {formatCurrency(roadmapResults.totalQuarterlySpend, report.client.currency)}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-green-50 rounded-lg text-center">
+                    <p className="text-sm text-muted">Projected Revenue</p>
+                    <p className="text-xl font-bold text-green-600">
+                      {formatCurrency(roadmapResults.totalQuarterlyRevenue, report.client.currency)}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-blue-50 rounded-lg text-center">
+                    <p className="text-sm text-muted">Projected ROI</p>
+                    <p className="text-xl font-bold text-blue-600">
+                      {roadmapResults.roi.toFixed(2)}x
+                    </p>
+                  </div>
+                  <div className="p-4 bg-purple-50 rounded-lg text-center">
+                    <p className="text-sm text-muted">Weeks Planned</p>
+                    <p className="text-xl font-bold text-purple-600">
+                      {roadmapWeeks}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Total Budget Slider */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="font-medium">Total Quarterly Budget</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted">{report.client.currency}</span>
+                      <input
+                        type="number"
+                        value={Math.round(roadmapResults.totalQuarterlySpend)}
+                        onChange={(e) => handleTotalRoadmapBudgetChange(parseInt(e.target.value) || 0)}
+                        className="w-36 px-3 py-2 border border-border rounded-lg text-right font-mono"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted">
+                    Adjust to scale all channels proportionally
+                  </p>
+                </div>
+
+                {/* Timeline Chart */}
+                <div className="mb-6">
+                  <h3 className="text-title mb-3">Spend & Revenue Over Time</h3>
+                  <div className="h-64 bg-gray-50 rounded-lg p-4">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={roadmapResults.weeklyData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="weekLabel" tick={{ fontSize: 11 }} />
+                        <YAxis
+                          yAxisId="left"
+                          tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
+                          tick={{ fontSize: 11 }}
+                          width={50}
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
+                          tick={{ fontSize: 11 }}
+                          width={50}
+                        />
+                        <Tooltip
+                          formatter={(value: number, name: string) => [
+                            formatCurrency(value, report.client.currency),
+                            name === 'projectedRevenue' ? 'Projected Revenue' : name === 'totalSpend' ? 'Total Spend' : formatChannelName(name)
+                          ]}
+                        />
+                        <Legend />
+                        {Object.keys(weeklyBudgets).map((channel, index) => (
+                          <Area
+                            key={channel}
+                            yAxisId="left"
+                            type="monotone"
+                            dataKey={channel}
+                            stackId="1"
+                            stroke={getChannelColor(channel)}
+                            fill={getChannelColor(channel)}
+                            fillOpacity={0.6}
+                            name={formatChannelName(channel)}
+                          />
+                        ))}
+                        <Line
+                          yAxisId="right"
+                          type="monotone"
+                          dataKey="projectedRevenue"
+                          stroke="#10B981"
+                          strokeWidth={3}
+                          dot={false}
+                          name="Projected Revenue"
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Weekly Budget Table */}
+                <div className="mb-6 overflow-x-auto">
+                  <h3 className="text-title mb-3">Weekly Budget Breakdown</h3>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-gray-50">
+                        <th className="text-left py-2 px-3 font-medium sticky left-0 bg-gray-50">Channel</th>
+                        {Array.from({ length: roadmapWeeks }, (_, i) => (
+                          <th key={i} className="text-center py-2 px-2 font-medium min-w-[70px]">
+                            W{i + 1}
+                          </th>
+                        ))}
+                        <th className="text-right py-2 px-3 font-medium bg-gray-100">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(weeklyBudgets).map(([channel, budgets]) => (
+                        <tr key={channel} className="border-b border-border hover:bg-gray-50">
+                          <td className="py-2 px-3 font-medium sticky left-0 bg-white">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded-full"
+                                style={{ backgroundColor: getChannelColor(channel) }}
+                              />
+                              {formatChannelName(channel)}
+                            </div>
+                          </td>
+                          {budgets.map((budget, weekIndex) => (
+                            <td key={weekIndex} className="py-1 px-1 text-center">
+                              <input
+                                type="number"
+                                value={budget}
+                                onChange={(e) => handleWeeklyBudgetChange(channel, weekIndex, parseInt(e.target.value) || 0)}
+                                className="w-16 px-1 py-1 border border-transparent hover:border-border focus:border-primary rounded text-center text-xs font-mono bg-transparent"
+                              />
+                            </td>
+                          ))}
+                          <td className="py-2 px-3 text-right font-medium bg-gray-50">
+                            <input
+                              type="number"
+                              value={roadmapResults.channelTotals[channel]?.spend || 0}
+                              onChange={(e) => handleChannelTotalChange(channel, parseInt(e.target.value) || 0)}
+                              className="w-20 px-2 py-1 border border-border rounded text-right text-xs font-mono"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-100 font-medium">
+                        <td className="py-2 px-3 sticky left-0 bg-gray-100">Total Spend</td>
+                        {roadmapResults.weeklyData.map((week, i) => (
+                          <td key={i} className="py-2 px-2 text-center text-xs">
+                            {formatCurrency(week.totalSpend, '')}
+                          </td>
+                        ))}
+                        <td className="py-2 px-3 text-right">
+                          {formatCurrency(roadmapResults.totalQuarterlySpend, report.client.currency)}
+                        </td>
+                      </tr>
+                      <tr className="bg-green-50 font-medium text-green-700">
+                        <td className="py-2 px-3 sticky left-0 bg-green-50">Projected Revenue</td>
+                        {roadmapResults.weeklyData.map((week, i) => (
+                          <td key={i} className="py-2 px-2 text-center text-xs">
+                            {formatCurrency(week.projectedRevenue, '')}
+                          </td>
+                        ))}
+                        <td className="py-2 px-3 text-right">
+                          {formatCurrency(roadmapResults.totalQuarterlyRevenue, report.client.currency)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Export Actions */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={exportRoadmapCSV}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    Export CSV
+                  </button>
+                  <button
+                    onClick={copyRoadmapToClipboard}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" />
+                    Copy to Clipboard
+                  </button>
+                </div>
+
+                <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm">
+                    <strong>Tip:</strong> Adjust weekly budgets to plan around sales events or seasonal peaks.
+                    The response curves account for diminishing returns, so spreading spend evenly often yields
+                    better results than concentrating it.
                   </p>
                 </div>
               </div>

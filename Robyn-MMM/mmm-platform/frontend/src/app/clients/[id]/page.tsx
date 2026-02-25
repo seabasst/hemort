@@ -754,6 +754,7 @@ function RunModelModal({
   const [dateColumn, setDateColumn] = useState('date')
   const [revenueColumn, setRevenueColumn] = useState('revenue')
   const [spendColumns, setSpendColumns] = useState<string[]>([])
+  const [controlColumns, setControlColumns] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -776,6 +777,16 @@ function RunModelModal({
         c.toLowerCase().includes('spend') || c.endsWith('_S')
       )
       setSpendColumns(spendCols)
+
+      // Auto-detect control columns (promotions, holidays, events)
+      const controlCols = currentDataset.columns.filter((c) =>
+        c.toLowerCase().includes('promo') ||
+        c.toLowerCase().includes('flag') ||
+        c.toLowerCase().includes('sale') ||
+        c.toLowerCase().includes('event') ||
+        c.toLowerCase().includes('holiday')
+      )
+      setControlColumns(controlCols)
     }
   }, [currentDataset])
 
@@ -789,6 +800,7 @@ function RunModelModal({
         date_column: dateColumn,
         revenue_column: revenueColumn,
         spend_columns: spendColumns,
+        control_columns: controlColumns.length > 0 ? controlColumns : undefined,
       }
       const run = await api.createModelRun(clientId, selectedDataset, config)
       onCreated(run)
@@ -870,6 +882,43 @@ function RunModelModal({
                   <span className="text-body">{c}</span>
                 </label>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="label">Control Variables (Optional)</label>
+            <p className="text-caption text-muted mb-2">
+              Mark columns for promotions, holidays, or events to separate their effect from marketing
+            </p>
+            <div className="space-y-2 max-h-40 overflow-y-auto border border-border rounded-lg p-3 bg-gray-50">
+              {currentDataset?.columns.filter(c =>
+                !spendColumns.includes(c) &&
+                c !== dateColumn &&
+                c !== revenueColumn
+              ).map((c) => (
+                <label key={c} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={controlColumns.includes(c)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setControlColumns([...controlColumns, c])
+                      } else {
+                        setControlColumns(controlColumns.filter((s) => s !== c))
+                      }
+                    }}
+                    className="rounded border-border"
+                  />
+                  <span className="text-body">{c}</span>
+                </label>
+              ))}
+              {currentDataset?.columns.filter(c =>
+                !spendColumns.includes(c) &&
+                c !== dateColumn &&
+                c !== revenueColumn
+              ).length === 0 && (
+                <p className="text-muted text-sm">No additional columns available</p>
+              )}
             </div>
           </div>
 
