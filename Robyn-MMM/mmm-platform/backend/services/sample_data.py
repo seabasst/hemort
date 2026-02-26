@@ -68,10 +68,60 @@ def generate_sample_data(
     # Total revenue = base + channel effects
     revenue = base_revenue + meta_effect + google_effect + tiktok_effect + email_effect
 
-    # Add promotions (random weeks)
+    # Add promotions (random weeks, more likely around holidays)
     promo_flag = np.random.choice([0, 1], size=weeks, p=[0.85, 0.15])
     promo_effect = promo_flag * np.random.uniform(30000, 100000, weeks)
     revenue = revenue + promo_effect
+
+    # Holiday flag (major retail periods: Black Friday, Christmas, Easter, Summer)
+    holiday_flag = np.zeros(weeks, dtype=int)
+    for i, d in enumerate(dates):
+        week_of_year = d.isocalendar()[1]
+        # Black Friday / Cyber Monday (week 47-48)
+        if week_of_year in [47, 48]:
+            holiday_flag[i] = 1
+        # Christmas (weeks 51-52)
+        elif week_of_year in [51, 52]:
+            holiday_flag[i] = 1
+        # Easter (around week 14-16)
+        elif week_of_year in [14, 15, 16]:
+            holiday_flag[i] = 1
+        # Summer sale (weeks 26-28)
+        elif week_of_year in [26, 27, 28]:
+            holiday_flag[i] = 1
+    holiday_effect = holiday_flag * np.random.uniform(40000, 120000, weeks)
+    revenue = revenue + holiday_effect
+
+    # Out of stock indicator (occasional supply issues)
+    out_of_stock = np.random.choice([0, 1], size=weeks, p=[0.92, 0.08])
+    # Stock issues reduce revenue
+    stock_effect = out_of_stock * np.random.uniform(-50000, -20000, weeks)
+    revenue = revenue + stock_effect
+
+    # New product launches (a few times per year)
+    new_product_launch = np.zeros(weeks, dtype=int)
+    launch_weeks = np.random.choice(range(weeks), size=max(1, weeks // 26), replace=False)
+    for lw in launch_weeks:
+        # Launch effect lasts 4 weeks
+        for offset in range(4):
+            if lw + offset < weeks:
+                new_product_launch[lw + offset] = 1
+    launch_effect = new_product_launch * np.random.uniform(20000, 80000, weeks)
+    revenue = revenue + launch_effect
+
+    # Competitor promotional activity (hurts our sales)
+    competitor_promo = np.random.choice([0, 1], size=weeks, p=[0.80, 0.20])
+    competitor_effect = competitor_promo * np.random.uniform(-30000, -10000, weeks)
+    revenue = revenue + competitor_effect
+
+    # Price index (100 = normal, <100 = discount, >100 = premium)
+    # Gradual changes with occasional promotions
+    price_index = 100 + np.cumsum(np.random.normal(0, 0.5, weeks))
+    price_index = np.clip(price_index, 85, 115)
+    # Apply discounts during promos
+    price_index = price_index - (promo_flag * np.random.uniform(5, 15, weeks))
+    price_index = np.round(price_index, 1)
+    # Price affects revenue (lower price = higher volume but captured in promo already)
 
     # Ensure positive values and round
     revenue = np.maximum(revenue, 100000).round(0)
@@ -88,7 +138,12 @@ def generate_sample_data(
         "spend_google": spend_google.astype(int),
         "spend_tiktok": spend_tiktok.astype(int),
         "spend_email": spend_email.astype(int),
-        "promo_flag": promo_flag
+        "promo_flag": promo_flag,
+        "holiday_flag": holiday_flag,
+        "out_of_stock": out_of_stock,
+        "new_product_launch": new_product_launch,
+        "competitor_promo": competitor_promo,
+        "price_index": price_index
     })
 
     return df

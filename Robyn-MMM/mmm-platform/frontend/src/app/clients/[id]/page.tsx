@@ -778,14 +778,24 @@ function RunModelModal({
       )
       setSpendColumns(spendCols)
 
-      // Auto-detect control columns (promotions, holidays, events)
-      const controlCols = currentDataset.columns.filter((c) =>
-        c.toLowerCase().includes('promo') ||
-        c.toLowerCase().includes('flag') ||
-        c.toLowerCase().includes('sale') ||
-        c.toLowerCase().includes('event') ||
-        c.toLowerCase().includes('holiday')
-      )
+      // Auto-detect control columns (promotions, holidays, stock, launches, etc.)
+      const controlCols = currentDataset.columns.filter((c) => {
+        const lower = c.toLowerCase()
+        return (
+          lower.includes('promo') ||
+          lower.includes('flag') ||
+          lower.includes('sale') ||
+          lower.includes('event') ||
+          lower.includes('holiday') ||
+          lower.includes('stock') ||
+          lower.includes('launch') ||
+          lower.includes('competitor') ||
+          lower.includes('price') ||
+          lower.includes('weather') ||
+          lower.includes('covid') ||
+          lower.includes('lockdown')
+        )
+      })
       setControlColumns(controlCols)
     }
   }, [currentDataset])

@@ -301,8 +301,11 @@ export default function ModelRunPage() {
 
   // Calculate simulated revenue based on response curves
   const simulatedResults = useMemo(() => {
-    console.log('Calculating simulatedResults, budgets:', simulatedBudgets)
-    if (!report?.response_curves || !report?.channel_contributions) return null
+    console.log('Calculating simulatedResults, budgets:', simulatedBudgets, 'curves:', report?.response_curves?.length)
+    if (!report?.response_curves || report.response_curves.length === 0 || !report?.channel_contributions) {
+      console.log('Missing data for simulatedResults')
+      return null
+    }
 
     let currentTotalRevenue = 0
     let simulatedTotalRevenue = 0
@@ -334,7 +337,10 @@ export default function ModelRunPage() {
       if (curve) {
         currentRevenue = interpolateResponse(curve, currentSpend)
         simulatedRevenue = interpolateResponse(curve, simulatedSpend)
+        console.log(`Channel ${contribution.channel}: spend ${currentSpend} -> ${simulatedSpend}, revenue ${currentRevenue.toFixed(0)} -> ${simulatedRevenue.toFixed(0)}`)
       } else {
+        console.log(`No curve found for ${contribution.channel}`)
+
         // Fallback: use linear ROI estimate
         const roi = contribution.roi || 1
         currentRevenue = currentSpend * roi
@@ -540,13 +546,11 @@ export default function ModelRunPage() {
   const handleSliderChange = (channel: string, value: number) => {
     const safeValue = isNaN(value) ? 0 : Math.max(0, value)
     console.log('Slider change:', channel, safeValue)
-    setSimulatedBudgets(prev => {
-      const newBudgets = { ...prev, [channel]: safeValue }
-      const newTotal = Object.values(newBudgets).reduce((sum, v) => sum + (v || 0), 0)
-      console.log('New budgets:', newBudgets, 'Total:', newTotal)
-      setTotalSimulatedBudget(newTotal)
-      return newBudgets
-    })
+    const newBudgets = { ...simulatedBudgets, [channel]: safeValue }
+    const newTotal = Object.values(newBudgets).reduce((sum, v) => sum + (v || 0), 0)
+    console.log('New budgets:', newBudgets, 'Total:', newTotal)
+    setSimulatedBudgets(newBudgets)
+    setTotalSimulatedBudget(newTotal)
   }
 
   const handleTotalBudgetChange = (newTotal: number) => {
@@ -1108,6 +1112,13 @@ export default function ModelRunPage() {
                       </div>
                     )
                   })}
+                </div>
+
+                {/* Debug display */}
+                <div className="mb-4 p-2 bg-yellow-100 text-xs font-mono">
+                  DEBUG: Total Budget: {totalSimulatedBudget.toFixed(0)} |
+                  Simulated Total: {simulatedResults.simulatedTotal.toFixed(0)} |
+                  Change: {simulatedResults.totalChange.toFixed(0)}
                 </div>
 
                 {/* Results Summary */}
